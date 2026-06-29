@@ -1,0 +1,71 @@
+from dotenv import load_dotenv
+from flask_cors import CORS
+from app.models import db
+from app.config import config
+from app.routes import api_v1
+from flask_migrate import Migrate
+from flask_jwt_extended import JWTManager, create_access_token, get_jwt, get_jwt_identity
+from flask import Flask, jsonify
+from datetime import datetime,  timezone
+
+load_dotenv(override = True)
+import os
+migrate = Migrate()
+jwt = JWTManager()
+
+def create_app():
+    app = Flask(__name__)
+    
+    app.url_map.strict_slashes = False
+    env = os.getenv('FLASK_ENV', 'development')
+    app.config.from_object(config[env])
+    app.register_blueprint(api_v1,url_prefix='/api_v1')
+    
+    @app.route('/')
+    @app.route('/<nombre>')    
+    def home(nombre = None):
+        if (nombre == None):
+            return f' <h1>Hola  desde programacion web dinamica 2026<h1>'
+        return f'Hola {nombre} te saludamos desde programacion web dinamica 2026'
+
+    @app.route('/saludo')
+    def saludo():
+        return f'Hola desde programacion web dinamica 2026 saludo'
+    db.init_app(app)
+    migrate.init_app(app=app, db=db)
+    jwt.init_app(app)
+    
+    @app.after_request
+    def refresh_token(response):
+        try:
+            token_data = get_jwt()
+            if not token_data:
+                return response
+
+            exp = token_data['exp']
+            now = datetime.now(timezone.utc).timestamp()  
+
+            if exp - now < 500:
+                new_token = create_access_token(identity=get_jwt_identity())
+                data = response.get_json()
+                if isinstance(data, dict):
+                    data['refresh_token'] = new_token
+                elif isinstance(data, list):
+                    data = {"data": data, "refresh_token": new_token}
+                else:
+                    return response
+
+                response.set_data(jsonify(data).data)
+            return response
+        except (RuntimeError, KeyError):
+            return response
+        
+    
+    CORS(app, resources={
+    r"/api_v1/.*": { 
+        "origins": ["http://localhost:5173"],
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"]
+    }
+    }, supports_credentials=True)
+    return app
